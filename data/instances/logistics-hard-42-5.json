@@ -1,0 +1,109 @@
+{
+  "task_id": "logistics-hard-42-5",
+  "domain_name": "household_logistics",
+  "problem_name": "hard_instance_5",
+  "goal_text": "Using robot_1, complete the following deliveries in the linear room layout room_1, room_2, room_3, room_4, room_5: move pkg_1 from room_1 to room_5; move pkg_2 from room_2 to room_5; move pkg_3 from room_3 to room_1.",
+  "valid_objects": [
+    "robot_1",
+    "pkg_1",
+    "pkg_2",
+    "pkg_3",
+    "distractor_pkg_1",
+    "distractor_pkg_2",
+    "room_1",
+    "room_2",
+    "room_3",
+    "room_4",
+    "room_5"
+  ],
+  "typed_objects": {
+    "robot": [
+      "robot_1"
+    ],
+    "package": [
+      "pkg_1",
+      "pkg_2",
+      "pkg_3",
+      "distractor_pkg_1",
+      "distractor_pkg_2"
+    ],
+    "room": [
+      "room_1",
+      "room_2",
+      "room_3",
+      "room_4",
+      "room_5"
+    ]
+  },
+  "initial_facts": [
+    "at(distractor_pkg_1, room_4)",
+    "at(distractor_pkg_2, room_4)",
+    "at(pkg_1, room_1)",
+    "at(pkg_2, room_2)",
+    "at(pkg_3, room_3)",
+    "at(robot_1, room_1)",
+    "connected(room_1, room_2)",
+    "connected(room_2, room_1)",
+    "connected(room_2, room_3)",
+    "connected(room_3, room_2)",
+    "connected(room_3, room_4)",
+    "connected(room_4, room_3)",
+    "connected(room_4, room_5)",
+    "connected(room_5, room_4)",
+    "handempty(robot_1)"
+  ],
+  "goal_facts": [
+    "at(pkg_1, room_5)",
+    "at(pkg_2, room_5)",
+    "at(pkg_3, room_1)"
+  ],
+  "pddl_domain": "(define (domain household_logistics)\n  (:requirements :strips :typing)\n  (:types robot package room)\n  (:predicates\n    (at-robot ?r - robot ?room - room)\n    (at-package ?p - package ?room - room)\n    (holding ?r - robot ?p - package)\n    (handempty ?r - robot)\n    (connected ?from - room ?to - room)\n  )\n\n  (:action move\n    :parameters (?r - robot ?from - room ?to - room)\n    :precondition (and\n      (at-robot ?r ?from)\n      (connected ?from ?to)\n    )\n    :effect (and\n      (not (at-robot ?r ?from))\n      (at-robot ?r ?to)\n    )\n  )\n\n  (:action pickup\n    :parameters (?r - robot ?p - package ?room - room)\n    :precondition (and\n      (at-robot ?r ?room)\n      (at-package ?p ?room)\n      (handempty ?r)\n    )\n    :effect (and\n      (not (at-package ?p ?room))\n      (not (handempty ?r))\n      (holding ?r ?p)\n    )\n  )\n\n  (:action drop\n    :parameters (?r - robot ?p - package ?room - room)\n    :precondition (and\n      (at-robot ?r ?room)\n      (holding ?r ?p)\n    )\n    :effect (and\n      (not (holding ?r ?p))\n      (handempty ?r)\n      (at-package ?p ?room)\n    )\n  )\n)",
+  "pddl_problem": "(define (problem hard_instance_5)\n  (:domain household_logistics)\n  (:objects\n    robot_1 - robot\n    room_1 room_2 room_3 room_4 room_5 - room\n    pkg_1 pkg_2 pkg_3 distractor_pkg_1 distractor_pkg_2 - package\n  )\n  (:init\n    (at-package distractor_pkg_1 room_4)\n    (at-package distractor_pkg_2 room_4)\n    (at-package pkg_1 room_1)\n    (at-package pkg_2 room_2)\n    (at-package pkg_3 room_3)\n    (at-robot robot_1 room_1)\n    (connected room_1 room_2)\n    (connected room_2 room_1)\n    (connected room_2 room_3)\n    (connected room_3 room_2)\n    (connected room_3 room_4)\n    (connected room_4 room_3)\n    (connected room_4 room_5)\n    (connected room_5 room_4)\n    (handempty robot_1)\n  )\n  (:goal\n    (and\n      (at-package pkg_1 room_5)\n      (at-package pkg_2 room_5)\n      (at-package pkg_3 room_1)\n    )\n  )\n)",
+  "metadata": {
+    "difficulty": "hard",
+    "deliveries": [
+      {
+        "package": "pkg_1",
+        "source": "room_1",
+        "destination": "room_5"
+      },
+      {
+        "package": "pkg_2",
+        "source": "room_2",
+        "destination": "room_5"
+      },
+      {
+        "package": "pkg_3",
+        "source": "room_3",
+        "destination": "room_1"
+      }
+    ],
+    "connections": [
+      "connected(room_1, room_2)",
+      "connected(room_2, room_1)",
+      "connected(room_2, room_3)",
+      "connected(room_3, room_2)",
+      "connected(room_3, room_4)",
+      "connected(room_4, room_3)",
+      "connected(room_4, room_5)",
+      "connected(room_5, room_4)"
+    ],
+    "action_schemas": {
+      "move": [
+        "robot",
+        "room",
+        "room"
+      ],
+      "pickup": [
+        "robot",
+        "package",
+        "room"
+      ],
+      "drop": [
+        "robot",
+        "package",
+        "room"
+      ]
+    }
+  }
+}

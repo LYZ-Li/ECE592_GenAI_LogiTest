@@ -1,0 +1,76 @@
+{
+  "task_id": "logistics-easy-42-24",
+  "domain_name": "household_logistics",
+  "problem_name": "easy_instance_24",
+  "goal_text": "Using robot_1, complete the following deliveries in the linear room layout room_1, room_2, room_3: move pkg_1 from room_1 to room_2.",
+  "valid_objects": [
+    "robot_1",
+    "pkg_1",
+    "distractor_pkg_1",
+    "room_1",
+    "room_2",
+    "room_3"
+  ],
+  "typed_objects": {
+    "robot": [
+      "robot_1"
+    ],
+    "package": [
+      "pkg_1",
+      "distractor_pkg_1"
+    ],
+    "room": [
+      "room_1",
+      "room_2",
+      "room_3"
+    ]
+  },
+  "initial_facts": [
+    "at(distractor_pkg_1, room_1)",
+    "at(pkg_1, room_1)",
+    "at(robot_1, room_1)",
+    "connected(room_1, room_2)",
+    "connected(room_2, room_1)",
+    "connected(room_2, room_3)",
+    "connected(room_3, room_2)",
+    "handempty(robot_1)"
+  ],
+  "goal_facts": [
+    "at(pkg_1, room_2)"
+  ],
+  "pddl_domain": "(define (domain household_logistics)\n  (:requirements :strips :typing)\n  (:types robot package room)\n  (:predicates\n    (at-robot ?r - robot ?room - room)\n    (at-package ?p - package ?room - room)\n    (holding ?r - robot ?p - package)\n    (handempty ?r - robot)\n    (connected ?from - room ?to - room)\n  )\n\n  (:action move\n    :parameters (?r - robot ?from - room ?to - room)\n    :precondition (and\n      (at-robot ?r ?from)\n      (connected ?from ?to)\n    )\n    :effect (and\n      (not (at-robot ?r ?from))\n      (at-robot ?r ?to)\n    )\n  )\n\n  (:action pickup\n    :parameters (?r - robot ?p - package ?room - room)\n    :precondition (and\n      (at-robot ?r ?room)\n      (at-package ?p ?room)\n      (handempty ?r)\n    )\n    :effect (and\n      (not (at-package ?p ?room))\n      (not (handempty ?r))\n      (holding ?r ?p)\n    )\n  )\n\n  (:action drop\n    :parameters (?r - robot ?p - package ?room - room)\n    :precondition (and\n      (at-robot ?r ?room)\n      (holding ?r ?p)\n    )\n    :effect (and\n      (not (holding ?r ?p))\n      (handempty ?r)\n      (at-package ?p ?room)\n    )\n  )\n)",
+  "pddl_problem": "(define (problem easy_instance_24)\n  (:domain household_logistics)\n  (:objects\n    robot_1 - robot\n    room_1 room_2 room_3 - room\n    pkg_1 distractor_pkg_1 - package\n  )\n  (:init\n    (at-package distractor_pkg_1 room_1)\n    (at-package pkg_1 room_1)\n    (at-robot robot_1 room_1)\n    (connected room_1 room_2)\n    (connected room_2 room_1)\n    (connected room_2 room_3)\n    (connected room_3 room_2)\n    (handempty robot_1)\n  )\n  (:goal\n    (and\n      (at-package pkg_1 room_2)\n    )\n  )\n)",
+  "metadata": {
+    "difficulty": "easy",
+    "deliveries": [
+      {
+        "package": "pkg_1",
+        "source": "room_1",
+        "destination": "room_2"
+      }
+    ],
+    "connections": [
+      "connected(room_1, room_2)",
+      "connected(room_2, room_1)",
+      "connected(room_2, room_3)",
+      "connected(room_3, room_2)"
+    ],
+    "action_schemas": {
+      "move": [
+        "robot",
+        "room",
+        "room"
+      ],
+      "pickup": [
+        "robot",
+        "package",
+        "room"
+      ],
+      "drop": [
+        "robot",
+        "package",
+        "room"
+      ]
+    }
+  }
+}

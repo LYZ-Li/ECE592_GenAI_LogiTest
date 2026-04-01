@@ -1,0 +1,22 @@
+# Model outputs and large files
+results/
+*.pt
+*.bin
+*.safetensors
+
+# Python
+__pycache__/
+*.pyc
+.eggs/
+*.egg-info/
+
+# Environment
+.env
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Conda
+.conda/

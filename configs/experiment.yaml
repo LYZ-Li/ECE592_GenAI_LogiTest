@@ -1,0 +1,41 @@
+experiment:
+  name: "memory_compression_study"
+  seed: 42
+  prompt_modes: ["direct_action", "cot"]
+  output_dir: "results/"
+
+dataset:
+  num_instances: 40
+  domain_family: "household_logistics"
+  difficulty_levels: ["easy", "medium", "hard"]
+  default_difficulty: "medium"
+  include_distractors: true
+  max_plan_steps: 18
+
+model:
+  name_or_path: "Qwen/Qwen3-8B"
+  quantization: "4bit"
+  max_new_tokens: 256
+  temperature: 0.0
+  device_map: "auto"
+  trust_remote_code: true
+
+planner:
+  backend: "fast_downward"
+  engine_name: "fast-downward"
+  timeout_seconds: 30
+
+memory_policies:
+  - name: "full_context"
+    type: "full"
+  - name: "truncation_4096"
+    type: "truncation"
+    max_context_tokens: 4096
+  - name: "summarization_4096"
+    type: "summarization"
+    max_context_tokens: 4096
+    recent_window_tokens: 1024
+    summary_model: null  # null = extractive; set to model path for abstractive
+
+evaluation:
+  max_rollout_steps_multiplier: 2
