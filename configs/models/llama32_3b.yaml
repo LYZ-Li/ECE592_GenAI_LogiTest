@@ -1,0 +1,7 @@
+label: "llama-3.2-3b"
+name_or_path: "bartowski/Llama-3.2-3B-Instruct-GGUF"
+backend_type: "openai_compatible"
+api_base_url: "http://localhost:8000"
+api_model: "llama-3.2-3b"
+max_new_tokens: 8192
+temperature: 0.0

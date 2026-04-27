@@ -1,0 +1,8 @@
+label: "minimax-m2.5"
+name_or_path: "MiniMax-M2.5"
+backend_type: "openai_compatible"
+api_base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+api_model: "MiniMax-M2.5"
+api_key_env: "ALIYUN_API_KEY"
+max_new_tokens: 8192
+temperature: 0.0

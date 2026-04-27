@@ -12,11 +12,17 @@ import yaml
 @dataclass
 class DatasetConfig:
     num_instances: int = 40
+    instances_per_level: Optional[int] = None
     domain_family: str = "household_logistics"
-    difficulty_levels: List[str] = field(default_factory=lambda: ["easy", "medium", "hard"])
-    max_plan_steps: int = 18
-    max_objects_per_type: int = 8
+    difficulty_levels: List[str] = field(
+        default_factory=lambda: ["easy", "medium", "hard", "very_hard", "extreme"]
+    )
+    max_plan_steps: int = 60
+    max_objects_per_type: int = 12
     include_distractors: bool = True
+    include_context_padding: bool = False
+    include_incident_history: bool = True
+    incident_history_count: int = 10
     default_difficulty: str = "medium"
 
 
@@ -25,21 +31,28 @@ class PlannerConfig:
     backend: str = "fast_downward"
     use_unified_planning: bool = True
     validate_candidates: bool = True
+    external_validation: bool = True
     engine_name: str = "fast-downward"
     timeout_seconds: int = 30
+    plan_cache_dir: str = "data/plans"
 
 
 @dataclass
 class ModelConfig:
+    label: Optional[str] = None
     name_or_path: str = "Qwen/Qwen3-8B"
     tokenizer_name_or_path: Optional[str] = None
     quantization: str = "4bit"
-    max_new_tokens: int = 256
+    max_new_tokens: int = 8192
     temperature: float = 0.0
     device_map: str = "auto"
     enable_thinking: bool = False
     strict_json_output: bool = True
     trust_remote_code: bool = False
+    backend_type: str = "transformers"
+    api_base_url: Optional[str] = None
+    api_model: Optional[str] = None
+    api_key_env: str = "OPENAI_API_KEY"
 
 
 @dataclass
@@ -54,6 +67,9 @@ class MemoryPolicyConfig:
 @dataclass
 class EvaluationConfig:
     require_parseable_action_block: bool = True
+    enable_parse_recovery: bool = True
+    enable_symbolic_repair: bool = True
+    max_symbolic_repair_attempts: int = 1
     allow_alternative_valid_plans: bool = True
     compute_precondition_violations: bool = True
     compute_ordering_violations: bool = True

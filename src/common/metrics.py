@@ -27,13 +27,21 @@ def ordering_violations(
     Returns:
         Number of ordering violations.
     """
-    gold_positions = {sig: idx for idx, sig in enumerate(gold_signatures)}
+    # Build a queue of positions for each signature so duplicates are
+    # matched in order (first occurrence first) instead of overwriting.
+    from collections import defaultdict, deque
+
+    position_queues: dict[str, deque[int]] = defaultdict(deque)
+    for idx, sig in enumerate(gold_signatures):
+        position_queues[sig].append(idx)
+
     violations = 0
     previous_position = -1
     for sig in predicted_signatures:
-        position = gold_positions.get(sig)
-        if position is None:
+        queue = position_queues.get(sig)
+        if not queue:
             continue
+        position = queue.popleft()
         if position < previous_position:
             violations += 1
         previous_position = position

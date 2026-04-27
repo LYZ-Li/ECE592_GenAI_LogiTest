@@ -1,0 +1,7 @@
+label: "gemma4-27b"
+name_or_path: "gemma-4-26B-A4B-it"
+backend_type: "openai_compatible"
+api_base_url: "http://localhost:8000"
+api_model: "gemma-4-26B-A4B-it"
+max_new_tokens: 81920
+temperature: 0.0

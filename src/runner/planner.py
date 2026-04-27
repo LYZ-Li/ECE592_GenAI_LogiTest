@@ -17,6 +17,20 @@ from src.common.contracts import (
 )
 from src.common.metrics import ordering_violations, plan_accuracy
 
+SUPPORTED_ACTIONS = {
+    "move",
+    "inspect_gripper",
+    "clean_gripper",
+    "calibrate_gripper",
+    "inspect_package",
+    "clear_obstruction",
+    "pickup",
+    "verify_grasp",
+    "regrasp",
+    "drop",
+    "verify_delivery",
+}
+
 
 @dataclass
 class ExecutionResult:
@@ -50,9 +64,8 @@ class PlannerBackend(Protocol):
 class SymbolicPlanExecutor:
     """Shared execution semantics for trace building and candidate validation.
 
-    Hard-codes action semantics for the household_logistics domain
-    (move, pickup, drop). An assertion guards against running on an
-    unsupported domain.
+    Hard-codes action semantics for the household robot logistics domain. An
+    assertion guards against running on an unsupported domain.
     """
 
     def initial_state(self, task: PlanningTaskInstance) -> List[str]:
@@ -90,9 +103,8 @@ class SymbolicPlanExecutor:
         Returns:
             ExecutionResult with episodes, diagnostics, and final state.
         """
-        # Guard: only household_logistics actions are supported
         schemas = task.metadata.get("action_schemas", {})
-        assert set(schemas.keys()) <= {"move", "pickup", "drop"}, (
+        assert set(schemas.keys()) <= SUPPORTED_ACTIONS, (
             f"SymbolicPlanExecutor only supports household_logistics actions, "
             f"got: {set(schemas.keys())}"
         )
@@ -265,6 +277,7 @@ class SymbolicPlanExecutor:
             return [
                 f"at({robot}, {room_from})",
                 f"connected({room_from}, {room_to})",
+                f"mobility_ready({robot})",
             ]
         if step.action_name == "pickup" and len(arguments) == 3:
             robot, package, room = arguments
@@ -272,10 +285,60 @@ class SymbolicPlanExecutor:
                 f"at({robot}, {room})",
                 f"at({package}, {room})",
                 f"handempty({robot})",
+                f"gripper_inspected({robot})",
+                f"gripper_clean({robot})",
+                f"gripper_calibrated({robot})",
+                f"package_inspected({package})",
+                f"accessible({package})",
+            ]
+        if step.action_name == "inspect_gripper" and len(arguments) == 2:
+            robot, room = arguments
+            return [f"at({robot}, {room})"]
+        if step.action_name == "clean_gripper" and len(arguments) == 2:
+            robot, room = arguments
+            return [
+                f"at({robot}, {room})",
+                f"gripper_inspected({robot})",
+                f"gripper_dirty({robot})",
+            ]
+        if step.action_name == "calibrate_gripper" and len(arguments) == 2:
+            robot, room = arguments
+            return [f"at({robot}, {room})", f"gripper_clean({robot})"]
+        if step.action_name == "inspect_package" and len(arguments) == 3:
+            robot, package, room = arguments
+            return [f"at({robot}, {room})", f"at({package}, {room})"]
+        if step.action_name == "clear_obstruction" and len(arguments) == 3:
+            robot, package, room = arguments
+            return [
+                f"at({robot}, {room})",
+                f"at({package}, {room})",
+                f"package_inspected({package})",
+                f"obstructed({package})",
+            ]
+        if step.action_name == "verify_grasp" and len(arguments) == 3:
+            robot, package, room = arguments
+            return [
+                f"at({robot}, {room})",
+                f"holding({robot}, {package})",
+                f"stable({package})",
+            ]
+        if step.action_name == "regrasp" and len(arguments) == 3:
+            robot, package, room = arguments
+            return [
+                f"at({robot}, {room})",
+                f"holding({robot}, {package})",
+                f"unstable({package})",
             ]
         if step.action_name == "drop" and len(arguments) == 3:
             robot, package, room = arguments
-            return [f"at({robot}, {room})", f"holding({robot}, {package})"]
+            return [
+                f"at({robot}, {room})",
+                f"holding({robot}, {package})",
+                f"grasp_verified({robot}, {package})",
+            ]
+        if step.action_name == "verify_delivery" and len(arguments) == 3:
+            robot, package, room = arguments
+            return [f"at({robot}, {room})", f"at({package}, {room})"]
         return []
 
     def _effect_descriptions(self, step: PlanStep) -> List[str]:
@@ -288,15 +351,47 @@ class SymbolicPlanExecutor:
             return [
                 f"not at({package}, {room})",
                 f"not handempty({robot})",
+                f"not mobility_ready({robot})",
                 f"holding({robot}, {package})",
+            ]
+        if step.action_name == "inspect_gripper" and len(arguments) == 2:
+            robot, _room = arguments
+            return [f"gripper_inspected({robot})"]
+        if step.action_name == "clean_gripper" and len(arguments) == 2:
+            robot, _room = arguments
+            return [f"not gripper_dirty({robot})", f"gripper_clean({robot})"]
+        if step.action_name == "calibrate_gripper" and len(arguments) == 2:
+            robot, _room = arguments
+            return [f"gripper_calibrated({robot})"]
+        if step.action_name == "inspect_package" and len(arguments) == 3:
+            _robot, package, _room = arguments
+            return [f"package_inspected({package})"]
+        if step.action_name == "clear_obstruction" and len(arguments) == 3:
+            _robot, package, _room = arguments
+            return [f"not obstructed({package})", f"accessible({package})"]
+        if step.action_name == "verify_grasp" and len(arguments) == 3:
+            robot, package, _room = arguments
+            return [
+                f"grasp_verified({robot}, {package})",
+                f"mobility_ready({robot})",
+            ]
+        if step.action_name == "regrasp" and len(arguments) == 3:
+            robot, package, _room = arguments
+            return [
+                f"grasp_verified({robot}, {package})",
+                f"mobility_ready({robot})",
             ]
         if step.action_name == "drop" and len(arguments) == 3:
             robot, package, room = arguments
             return [
                 f"not holding({robot}, {package})",
+                f"not grasp_verified({robot}, {package})",
                 f"handempty({robot})",
                 f"at({package}, {room})",
             ]
+        if step.action_name == "verify_delivery" and len(arguments) == 3:
+            _robot, package, room = arguments
+            return [f"delivery_verified({package}, {room})"]
         return []
 
     def _apply_effects(self, state: Set[str], step: PlanStep) -> Set[str]:
@@ -306,16 +401,46 @@ class SymbolicPlanExecutor:
             robot, room_from, room_to = arguments
             new_state.discard(f"at({robot}, {room_from})")
             new_state.add(f"at({robot}, {room_to})")
+        elif step.action_name == "inspect_gripper":
+            robot, _room = arguments
+            new_state.add(f"gripper_inspected({robot})")
+        elif step.action_name == "clean_gripper":
+            robot, _room = arguments
+            new_state.discard(f"gripper_dirty({robot})")
+            new_state.add(f"gripper_clean({robot})")
+        elif step.action_name == "calibrate_gripper":
+            robot, _room = arguments
+            new_state.add(f"gripper_calibrated({robot})")
+        elif step.action_name == "inspect_package":
+            _robot, package, _room = arguments
+            new_state.add(f"package_inspected({package})")
+        elif step.action_name == "clear_obstruction":
+            _robot, package, _room = arguments
+            new_state.discard(f"obstructed({package})")
+            new_state.add(f"accessible({package})")
         elif step.action_name == "pickup":
             robot, package, room = arguments
             new_state.discard(f"at({package}, {room})")
             new_state.discard(f"handempty({robot})")
+            new_state.discard(f"mobility_ready({robot})")
             new_state.add(f"holding({robot}, {package})")
+        elif step.action_name == "verify_grasp":
+            robot, package, _room = arguments
+            new_state.add(f"grasp_verified({robot}, {package})")
+            new_state.add(f"mobility_ready({robot})")
+        elif step.action_name == "regrasp":
+            robot, package, _room = arguments
+            new_state.add(f"grasp_verified({robot}, {package})")
+            new_state.add(f"mobility_ready({robot})")
         elif step.action_name == "drop":
             robot, package, room = arguments
             new_state.discard(f"holding({robot}, {package})")
+            new_state.discard(f"grasp_verified({robot}, {package})")
             new_state.add(f"handempty({robot})")
             new_state.add(f"at({package}, {room})")
+        elif step.action_name == "verify_delivery":
+            _robot, package, room = arguments
+            new_state.add(f"delivery_verified({package}, {room})")
         return new_state
 
     @staticmethod
@@ -471,6 +596,76 @@ class FastDownwardPlannerBackend:
             step_diagnostics=replay.step_diagnostics,
             notes=notes,
         )
+
+    def external_validate(
+        self,
+        task: PlanningTaskInstance,
+        candidate_steps: List[PlanStep],
+    ) -> Dict[str, object]:
+        """Best-effort validation through Unified Planning's validator.
+
+        The in-repo symbolic executor remains the source of detailed
+        diagnostics. This method adds an external sanity check when the
+        optional Unified Planning validator stack is installed and can build a
+        plan object for the generated PDDL problem.
+        """
+        if not task.pddl_domain or not task.pddl_problem:
+            return {
+                "status": "unavailable",
+                "message": "task has no PDDL domain/problem",
+            }
+
+        try:
+            import up_fast_downward  # noqa: F401
+            from unified_planning.io import PDDLReader
+            from unified_planning.plans import ActionInstance, SequentialPlan
+            from unified_planning.shortcuts import ObjectExp, PlanValidator
+        except ImportError as exc:
+            return {"status": "unavailable", "message": str(exc)}
+
+        try:
+            with TemporaryDirectory(prefix="validator_") as tmp_dir:
+                tmp_path = Path(tmp_dir)
+                domain_path = tmp_path / "domain.pddl"
+                problem_path = tmp_path / "problem.pddl"
+                domain_path.write_text(task.pddl_domain)
+                problem_path.write_text(task.pddl_problem)
+
+                reader = PDDLReader()
+                problem = reader.parse_problem(str(domain_path), str(problem_path))
+                actions = {action.name: action for action in problem.actions}
+                objects = {obj.name: obj for obj in problem.all_objects}
+                instances = []
+                for step in candidate_steps:
+                    action = actions.get(step.action_name)
+                    if action is None:
+                        return {
+                            "status": "invalid",
+                            "message": f"unknown action `{step.action_name}`",
+                        }
+                    try:
+                        params = tuple(
+                            ObjectExp(objects[arg]) for arg in step.arguments
+                        )
+                    except KeyError as exc:
+                        return {
+                            "status": "invalid",
+                            "message": f"unknown object `{exc.args[0]}`",
+                        }
+                    instances.append(ActionInstance(action, params))
+
+                plan = SequentialPlan(instances)
+                with PlanValidator(problem_kind=problem.kind) as validator:
+                    result = validator.validate(problem, plan)
+        except Exception as exc:  # pragma: no cover - depends on optional UP stack
+            return {"status": "error", "message": str(exc)}
+
+        status = str(getattr(result, "status", "unknown"))
+        return {
+            "status": "valid" if "VALID" in status.upper() else "invalid",
+            "raw_status": status,
+            "message": str(getattr(result, "reason", "")),
+        }
 
     @staticmethod
     def _parameter_name(parameter: object) -> str:

@@ -1,28 +1,72 @@
-"""Entry point for `python -m src.analysis`."""
+"""Entry point for ``python -m src.analysis``."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+from src.analysis.plot import (
+    generate_legacy_single_run_summary,
+    generate_publication_bundle,
+)
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate analysis plots")
+    """Parse CLI arguments and run the requested analysis mode."""
+    parser = argparse.ArgumentParser(description="Generate canonical analysis artifacts")
     parser.add_argument(
-        "--results", type=str, required=True,
-        help="Path to results directory containing results.jsonl",
+        "--results-root",
+        type=str,
+        default=None,
+        help="Root directory containing per-model result folders",
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None,
-        help="Output directory for figures (default: results_dir/figures/)",
+        "--analysis-dir",
+        type=str,
+        default="analysis/canonical",
+        help="Output directory for canonical CSV and JSON tables",
+    )
+    parser.add_argument(
+        "--figures-dir",
+        type=str,
+        default="paper/figures",
+        help="Output directory for report figure PDF/PNG assets",
+    )
+    parser.add_argument(
+        "--plans-dir",
+        type=str,
+        default="data/plans",
+        help="Directory containing canonical plan JSON files",
+    )
+    parser.add_argument(
+        "--results",
+        type=str,
+        default=None,
+        help=(
+            "Deprecated compatibility path: directory containing one results.jsonl "
+            "file for a single-run summary"
+        ),
     )
     args = parser.parse_args()
 
-    results_dir = Path(args.results)
-    output_dir = Path(args.output_dir) if args.output_dir else results_dir / "figures"
+    if args.results_root:
+        generate_publication_bundle(
+            results_root=Path(args.results_root),
+            analysis_dir=Path(args.analysis_dir),
+            figures_dir=Path(args.figures_dir),
+            plans_dir=Path(args.plans_dir),
+        )
+        return
 
-    from src.analysis.plot import generate_all_figures
-    generate_all_figures(results_dir, output_dir)
+    if args.results:
+        generate_legacy_single_run_summary(
+            results_dir=Path(args.results),
+            output_dir=Path(args.analysis_dir),
+        )
+        return
+
+    parser.error("Provide either --results-root for canonical analysis or --results for compatibility mode.")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,7 @@
+label: "qwen3.5-9b"
+name_or_path: "bartowski/Qwen_Qwen3.5-9B-GGUF"
+backend_type: "openai_compatible"
+api_base_url: "http://localhost:8000"
+api_model: "qwen3.5-9b"
+max_new_tokens: 8192
+temperature: 0.0

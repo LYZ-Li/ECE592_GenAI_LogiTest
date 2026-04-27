@@ -67,4 +67,5 @@ def main() -> None:
     print(f"Summary written to {output_path} ({len(groups)} groups, {len(records)} trials)")
 
 
-main()
+if __name__ == "__main__":
+    main()

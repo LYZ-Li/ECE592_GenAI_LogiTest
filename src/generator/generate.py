@@ -11,6 +11,20 @@ from typing import Dict, List
 
 from src.common.contracts import PlanningTaskInstance
 
+ACTION_SCHEMAS = {
+    "move": ["robot", "room", "room"],
+    "inspect_gripper": ["robot", "room"],
+    "clean_gripper": ["robot", "room"],
+    "calibrate_gripper": ["robot", "room"],
+    "inspect_package": ["robot", "package", "room"],
+    "clear_obstruction": ["robot", "package", "room"],
+    "pickup": ["robot", "package", "room"],
+    "verify_grasp": ["robot", "package", "room"],
+    "regrasp": ["robot", "package", "room"],
+    "drop": ["robot", "package", "room"],
+    "verify_delivery": ["robot", "package", "room"],
+}
+
 
 @dataclass(frozen=True)
 class DifficultySpec:
@@ -18,6 +32,9 @@ class DifficultySpec:
     packages: int
     distractors: int
     deliveries: int
+    obstructed: int
+    unstable: int
+    dirty_gripper: bool
 
 
 class LinearLogisticsTaskGenerator:
@@ -26,9 +43,26 @@ class LinearLogisticsTaskGenerator:
     def __init__(self, include_distractors: bool = True) -> None:
         self.include_distractors = include_distractors
         self._difficulty_specs: Dict[str, DifficultySpec] = {
-            "easy": DifficultySpec(rooms=3, packages=1, distractors=1, deliveries=1),
-            "medium": DifficultySpec(rooms=4, packages=2, distractors=1, deliveries=2),
-            "hard": DifficultySpec(rooms=5, packages=3, distractors=2, deliveries=3),
+            "easy": DifficultySpec(
+                rooms=3, packages=1, distractors=1, deliveries=1,
+                obstructed=0, unstable=0, dirty_gripper=False,
+            ),
+            "medium": DifficultySpec(
+                rooms=4, packages=2, distractors=1, deliveries=2,
+                obstructed=1, unstable=0, dirty_gripper=True,
+            ),
+            "hard": DifficultySpec(
+                rooms=5, packages=3, distractors=2, deliveries=3,
+                obstructed=1, unstable=1, dirty_gripper=True,
+            ),
+            "very_hard": DifficultySpec(
+                rooms=8, packages=5, distractors=4, deliveries=5,
+                obstructed=2, unstable=2, dirty_gripper=True,
+            ),
+            "extreme": DifficultySpec(
+                rooms=12, packages=8, distractors=6, deliveries=8,
+                obstructed=3, unstable=3, dirty_gripper=True,
+            ),
         }
 
     def generate_instance(
@@ -75,7 +109,16 @@ class LinearLogisticsTaskGenerator:
         initial_facts: List[str] = [
             self._fact("at", robot, robot_start),
             self._fact("handempty", robot),
+            self._fact("mobility_ready", robot),
         ]
+        if spec.dirty_gripper:
+            initial_facts.append(self._fact("gripper_dirty", robot))
+        else:
+            initial_facts.extend([
+                self._fact("gripper_inspected", robot),
+                self._fact("gripper_clean", robot),
+                self._fact("gripper_calibrated", robot),
+            ])
         package_locations: Dict[str, str] = {}
         deliveries: List[dict] = []
 
@@ -101,23 +144,62 @@ class LinearLogisticsTaskGenerator:
             package_locations[package] = room
             initial_facts.append(self._fact("at", package, room))
 
+        delivery_packages = [delivery["package"] for delivery in deliveries[: spec.deliveries]]
+        obstructed_packages = set(rng.sample(
+            delivery_packages,
+            k=min(spec.obstructed, len(delivery_packages)),
+        ))
+        unstable_candidates = [
+            package for package in delivery_packages if package not in obstructed_packages
+        ]
+        if len(unstable_candidates) < min(spec.unstable, len(delivery_packages)):
+            unstable_candidates = delivery_packages
+        unstable_packages = set(rng.sample(
+            unstable_candidates,
+            k=min(spec.unstable, len(unstable_candidates)),
+        ))
+
+        for package in all_packages:
+            if package in obstructed_packages:
+                initial_facts.append(self._fact("obstructed", package))
+            else:
+                initial_facts.append(self._fact("accessible", package))
+            if package in unstable_packages:
+                initial_facts.append(self._fact("unstable", package))
+            else:
+                initial_facts.append(self._fact("stable", package))
+
         connections = self._line_connections(rooms)
         initial_facts.extend(connections)
 
         goal_facts = [
-            self._fact("at", delivery["package"], delivery["destination"])
+            self._fact(
+                "delivery_verified",
+                delivery["package"],
+                delivery["destination"],
+            )
             for delivery in deliveries[: spec.deliveries]
         ]
-        goal_text = self._goal_text(deliveries[: spec.deliveries], robot, rooms)
+        goal_text = self._goal_text(
+            deliveries[: spec.deliveries],
+            robot,
+            rooms,
+            sorted(obstructed_packages),
+            sorted(unstable_packages),
+            spec.dirty_gripper,
+        )
 
         metadata = {
             "difficulty": difficulty,
+            "instance_index": instance_index,
             "deliveries": deliveries[: spec.deliveries],
             "connections": connections,
+            "obstructed_packages": sorted(obstructed_packages),
+            "unstable_packages": sorted(unstable_packages),
+            "dirty_gripper": spec.dirty_gripper,
             "action_schemas": {
-                "move": ["robot", "room", "room"],
-                "pickup": ["robot", "package", "room"],
-                "drop": ["robot", "package", "room"],
+                name: list(argument_types)
+                for name, argument_types in ACTION_SCHEMAS.items()
             },
         }
 
@@ -143,18 +225,23 @@ class LinearLogisticsTaskGenerator:
         )
 
     def generate_dataset(
-        self, count: int, seed: int
+        self,
+        count: int,
+        seed: int,
+        difficulty_levels: list[str] | None = None,
     ) -> List[PlanningTaskInstance]:
         """Generate a batch of instances cycling through difficulty levels.
 
         Args:
             count: Total number of instances to generate.
             seed: Base random seed.
+            difficulty_levels: Subset of difficulty names to cycle through.
+                Defaults to all registered difficulties.
 
         Returns:
             List of PlanningTaskInstance objects.
         """
-        difficulties = list(self._difficulty_specs.keys())
+        difficulties = difficulty_levels or list(self._difficulty_specs.keys())
         dataset: List[PlanningTaskInstance] = []
         for index in range(count):
             difficulty = difficulties[index % len(difficulties)]
@@ -165,6 +252,64 @@ class LinearLogisticsTaskGenerator:
                     instance_index=index,
                 )
             )
+        return dataset
+
+    def generate_balanced_dataset(
+        self,
+        seed: int,
+        difficulty_levels: list[str] | None = None,
+        instances_per_level: int | None = None,
+        total_instances: int | None = None,
+    ) -> List[PlanningTaskInstance]:
+        """Generate a deterministic balanced dataset by difficulty level.
+
+        Args:
+            seed: Base random seed.
+            difficulty_levels: Ordered difficulty names to include.
+            instances_per_level: Number of instances for each difficulty.
+            total_instances: Total number of instances. Must divide evenly by
+                the number of selected difficulty levels.
+
+        Returns:
+            Tasks ordered by per-level index, then difficulty order. For five
+            levels and two instances per level, the order is easy-0,
+            medium-0, ..., extreme-0, easy-1, ..., extreme-1.
+
+        Raises:
+            ValueError: If counts are missing, invalid, or not evenly balanced.
+        """
+        difficulties = difficulty_levels or list(self._difficulty_specs.keys())
+        if not difficulties:
+            raise ValueError("At least one difficulty level is required.")
+        for difficulty in difficulties:
+            if difficulty not in self._difficulty_specs:
+                raise ValueError(f"Unsupported difficulty: {difficulty}")
+
+        if instances_per_level is None:
+            if total_instances is None:
+                raise ValueError(
+                    "Either instances_per_level or total_instances is required."
+                )
+            if total_instances % len(difficulties) != 0:
+                raise ValueError(
+                    "total_instances must divide evenly across difficulty_levels "
+                    f"({total_instances} over {len(difficulties)} levels)."
+                )
+            instances_per_level = total_instances // len(difficulties)
+
+        if instances_per_level < 1:
+            raise ValueError("instances_per_level must be at least 1.")
+
+        dataset: List[PlanningTaskInstance] = []
+        for instance_index in range(instances_per_level):
+            for difficulty in difficulties:
+                dataset.append(
+                    self.generate_instance(
+                        seed=seed,
+                        difficulty=difficulty,
+                        instance_index=instance_index,
+                    )
+                )
         return dataset
 
     @staticmethod
@@ -180,15 +325,37 @@ class LinearLogisticsTaskGenerator:
         return facts
 
     @staticmethod
-    def _goal_text(deliveries: List[dict], robot: str, rooms: List[str]) -> str:
+    def _goal_text(
+        deliveries: List[dict],
+        robot: str,
+        rooms: List[str],
+        obstructed_packages: List[str],
+        unstable_packages: List[str],
+        dirty_gripper: bool,
+    ) -> str:
         clauses = [
-            f"move {delivery['package']} from {delivery['source']} to {delivery['destination']}"
+            f"deliver and verify {delivery['package']} from "
+            f"{delivery['source']} to {delivery['destination']}"
             for delivery in deliveries
         ]
         clause_text = "; ".join(clauses)
+        constraints: List[str] = []
+        if dirty_gripper:
+            constraints.append("the gripper starts dirty and must be inspected, cleaned, and calibrated")
+        if obstructed_packages:
+            constraints.append(
+                "clear obstructions before pickup for "
+                + ", ".join(obstructed_packages)
+            )
+        if unstable_packages:
+            constraints.append(
+                "use regrasp verification for unstable packages "
+                + ", ".join(unstable_packages)
+            )
+        constraint_text = " ".join(constraints)
         return (
             f"Using {robot}, complete the following deliveries in the linear room layout "
-            f"{', '.join(rooms)}: {clause_text}."
+            f"{', '.join(rooms)}: {clause_text}. {constraint_text}".strip()
         )
 
     @staticmethod
@@ -202,6 +369,18 @@ class LinearLogisticsTaskGenerator:
     (holding ?r - robot ?p - package)
     (handempty ?r - robot)
     (connected ?from - room ?to - room)
+    (gripper-inspected ?r - robot)
+    (gripper-dirty ?r - robot)
+    (gripper-clean ?r - robot)
+    (gripper-calibrated ?r - robot)
+    (mobility-ready ?r - robot)
+    (package-inspected ?p - package)
+    (obstructed ?p - package)
+    (accessible ?p - package)
+    (stable ?p - package)
+    (unstable ?p - package)
+    (grasp-verified ?r - robot ?p - package)
+    (delivery-verified ?p - package ?room - room)
   )
 
   (:action move
@@ -209,10 +388,70 @@ class LinearLogisticsTaskGenerator:
     :precondition (and
       (at-robot ?r ?from)
       (connected ?from ?to)
+      (mobility-ready ?r)
     )
     :effect (and
       (not (at-robot ?r ?from))
       (at-robot ?r ?to)
+    )
+  )
+
+  (:action inspect_gripper
+    :parameters (?r - robot ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+    )
+    :effect (and
+      (gripper-inspected ?r)
+    )
+  )
+
+  (:action clean_gripper
+    :parameters (?r - robot ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (gripper-inspected ?r)
+      (gripper-dirty ?r)
+    )
+    :effect (and
+      (not (gripper-dirty ?r))
+      (gripper-clean ?r)
+    )
+  )
+
+  (:action calibrate_gripper
+    :parameters (?r - robot ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (gripper-clean ?r)
+    )
+    :effect (and
+      (gripper-calibrated ?r)
+    )
+  )
+
+  (:action inspect_package
+    :parameters (?r - robot ?p - package ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (at-package ?p ?room)
+    )
+    :effect (and
+      (package-inspected ?p)
+    )
+  )
+
+  (:action clear_obstruction
+    :parameters (?r - robot ?p - package ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (at-package ?p ?room)
+      (package-inspected ?p)
+      (obstructed ?p)
+    )
+    :effect (and
+      (not (obstructed ?p))
+      (accessible ?p)
     )
   )
 
@@ -222,11 +461,43 @@ class LinearLogisticsTaskGenerator:
       (at-robot ?r ?room)
       (at-package ?p ?room)
       (handempty ?r)
+      (gripper-inspected ?r)
+      (gripper-clean ?r)
+      (gripper-calibrated ?r)
+      (package-inspected ?p)
+      (accessible ?p)
     )
     :effect (and
       (not (at-package ?p ?room))
       (not (handempty ?r))
+      (not (mobility-ready ?r))
       (holding ?r ?p)
+    )
+  )
+
+  (:action verify_grasp
+    :parameters (?r - robot ?p - package ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (holding ?r ?p)
+      (stable ?p)
+    )
+    :effect (and
+      (grasp-verified ?r ?p)
+      (mobility-ready ?r)
+    )
+  )
+
+  (:action regrasp
+    :parameters (?r - robot ?p - package ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (holding ?r ?p)
+      (unstable ?p)
+    )
+    :effect (and
+      (grasp-verified ?r ?p)
+      (mobility-ready ?r)
     )
   )
 
@@ -235,11 +506,24 @@ class LinearLogisticsTaskGenerator:
     :precondition (and
       (at-robot ?r ?room)
       (holding ?r ?p)
+      (grasp-verified ?r ?p)
     )
     :effect (and
       (not (holding ?r ?p))
+      (not (grasp-verified ?r ?p))
       (handempty ?r)
       (at-package ?p ?room)
+    )
+  )
+
+  (:action verify_delivery
+    :parameters (?r - robot ?p - package ?room - room)
+    :precondition (and
+      (at-robot ?r ?room)
+      (at-package ?p ?room)
+    )
+    :effect (and
+      (delivery-verified ?p ?room)
     )
   )
 )"""
@@ -259,6 +543,30 @@ class LinearLogisticsTaskGenerator:
             return f"(handempty {tokens[0]})"
         if name == "connected":
             return f"(connected {tokens[0]} {tokens[1]})"
+        if name == "gripper_inspected":
+            return f"(gripper-inspected {tokens[0]})"
+        if name == "gripper_dirty":
+            return f"(gripper-dirty {tokens[0]})"
+        if name == "gripper_clean":
+            return f"(gripper-clean {tokens[0]})"
+        if name == "gripper_calibrated":
+            return f"(gripper-calibrated {tokens[0]})"
+        if name == "mobility_ready":
+            return f"(mobility-ready {tokens[0]})"
+        if name == "package_inspected":
+            return f"(package-inspected {tokens[0]})"
+        if name == "obstructed":
+            return f"(obstructed {tokens[0]})"
+        if name == "accessible":
+            return f"(accessible {tokens[0]})"
+        if name == "stable":
+            return f"(stable {tokens[0]})"
+        if name == "unstable":
+            return f"(unstable {tokens[0]})"
+        if name == "grasp_verified":
+            return f"(grasp-verified {tokens[0]} {tokens[1]})"
+        if name == "delivery_verified":
+            return f"(delivery-verified {tokens[0]} {tokens[1]})"
         raise ValueError(f"Unsupported fact for PDDL export: {fact}")
 
     def _build_problem_pddl(
@@ -330,16 +638,26 @@ def cli_main() -> None:
     """CLI entry point for dataset generation."""
     parser = argparse.ArgumentParser(description="Generate PDDL logistics instances")
     parser.add_argument("--n-instances", type=int, default=40)
+    parser.add_argument("--instances-per-level", type=int, default=None)
     parser.add_argument("--domain", type=str, default="logistics")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default="data/instances")
-    parser.add_argument("--include-distractors", action="store_true", default=True)
+    parser.add_argument("--include-distractors", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 
     generator = LinearLogisticsTaskGenerator(
         include_distractors=args.include_distractors
     )
-    dataset = generator.generate_dataset(count=args.n_instances, seed=args.seed)
+    if args.instances_per_level is not None:
+        dataset = generator.generate_balanced_dataset(
+            seed=args.seed,
+            instances_per_level=args.instances_per_level,
+        )
+    else:
+        dataset = generator.generate_balanced_dataset(
+            seed=args.seed,
+            total_instances=args.n_instances,
+        )
     paths = save_dataset(dataset, Path(args.output_dir))
     print(f"Generated {len(paths)} instances in {args.output_dir}/")
 

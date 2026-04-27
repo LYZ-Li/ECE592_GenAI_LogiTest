@@ -1,0 +1,8 @@
+label: "deepseek-v3.2"
+name_or_path: "deepseek-v3.2"
+backend_type: "openai_compatible"
+api_base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+api_model: "deepseek-v3.2"
+api_key_env: "ALIYUN_API_KEY"
+max_new_tokens: 8192
+temperature: 0.0

@@ -4,12 +4,41 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
+import re
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
+from urllib.parse import urlparse
 
 from src.common.contracts import ModelResponse
 
+if TYPE_CHECKING:
+    from src.runner.config import ModelConfig
+
 logger = logging.getLogger("memory_compression.engine")
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL)
+_LOCAL_API_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _strip_think_tags(text: str) -> str:
+    """Remove Qwen3-style <think>…</think> reasoning blocks from output.
+
+    Handles both closed tags and truncated (unclosed) blocks where the
+    model ran out of tokens mid-thought.
+    """
+    text = _THINK_RE.sub("", text)
+    text = _UNCLOSED_THINK_RE.sub("", text)
+    return text
+
+
+def _is_local_api_url(api_base_url: str | None) -> bool:
+    """Return whether an API URL points at a local OpenAI-compatible server."""
+    if not api_base_url:
+        return False
+    hostname = urlparse(api_base_url).hostname
+    return hostname in _LOCAL_API_HOSTS
 
 
 class ModelBackend(Protocol):
@@ -38,6 +67,7 @@ class TransformersQwenBackend:
         quantization: One of "4bit", "8bit", or "none".
         device_map: Device placement strategy.
         trust_remote_code: Whether to allow remote code execution.
+        enable_thinking: Whether to enable Qwen3 thinking mode in chat template.
     """
 
     model_name_or_path: str
@@ -45,6 +75,7 @@ class TransformersQwenBackend:
     quantization: str = "none"
     device_map: str = "auto"
     trust_remote_code: bool = False
+    enable_thinking: bool = False
     _pipeline: object | None = field(default=None, init=False, repr=False)
     _tokenizer: object | None = field(default=None, init=False, repr=False)
 
@@ -65,16 +96,18 @@ class TransformersQwenBackend:
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            enable_thinking=self.enable_thinking,
         )
         outputs = pipeline(
             prompt_text,
             max_new_tokens=max_new_tokens,
+            max_length=None,
             temperature=temperature,
             do_sample=temperature > 0.0,
             return_full_text=False,
         )
         raw_output = outputs[0]["generated_text"]
-        generated_text = raw_output.strip()
+        generated_text = _strip_think_tags(raw_output).strip()
         prompt_tokens = len(tokenizer.encode(prompt_text, add_special_tokens=False))
         completion_tokens = len(tokenizer.encode(generated_text, add_special_tokens=False))
         return ModelResponse(
@@ -155,3 +188,67 @@ class TransformersQwenBackend:
                 self.quantization,
             )
         return self._pipeline, self._tokenizer
+
+
+def build_model_backend(config: ModelConfig) -> ModelBackend:
+    """Create a model backend from config.
+
+    Args:
+        config: Model configuration with backend_type selection.
+
+    Returns:
+        A configured ModelBackend instance.
+
+    Raises:
+        RuntimeError: If required environment variables are missing.
+        ValueError: If backend_type is unsupported.
+    """
+    if config.backend_type == "anthropic_api":
+        from src.runner.api_backend import ClaudeAPIBackend
+
+        token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        if not token:
+            raise RuntimeError(
+                "ANTHROPIC_AUTH_TOKEN environment variable is required "
+                "for the anthropic_api backend."
+            )
+        return ClaudeAPIBackend(
+            api_base_url=config.api_base_url or "https://cc.580ai.net",
+            auth_token=token,
+            model=config.api_model or "claude-sonnet-4-20250514",
+        )
+
+    if config.backend_type == "openai_compatible":
+        from src.runner.openai_backend import OpenAICompatibleBackend
+
+        api_base_url = config.api_base_url or "https://openrouter.ai/api"
+        api_key_env = config.api_key_env or "OPENAI_API_KEY"
+        token = os.environ.get(api_key_env)
+        if not token and _is_local_api_url(api_base_url):
+            token = "local-openai-compatible"
+        if not token:
+            raise RuntimeError(
+                f"{api_key_env} environment variable is required "
+                "for the openai_compatible backend. Set model.api_key_env "
+                "to use a provider-specific key variable."
+            )
+        return OpenAICompatibleBackend(
+            api_base_url=api_base_url,
+            auth_token=token,
+            model=config.api_model or "Qwen/Qwen3-8B",
+        )
+
+    if config.backend_type == "transformers":
+        return TransformersQwenBackend(
+            model_name_or_path=config.name_or_path,
+            tokenizer_name_or_path=config.tokenizer_name_or_path,
+            quantization=config.quantization,
+            device_map=config.device_map,
+            trust_remote_code=config.trust_remote_code,
+            enable_thinking=config.enable_thinking,
+        )
+
+    raise ValueError(
+        f"Unsupported backend_type '{config.backend_type}'. "
+        "Supported: transformers, anthropic_api, openai_compatible."
+    )
